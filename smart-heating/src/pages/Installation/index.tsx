@@ -1,4 +1,11 @@
-import { useState, useEffect } from 'react';
+declare global {
+  interface Window {
+    __newRoomData?: Array<{id:string;userId:string;userName:string;address:string;stationId:string;stationName:string;community:string;currentTemp:number;targetTemp:number;status:string;lastUpdate:string}>;
+    __newBilling?: Array<{id:string;userId:string;userName:string;address:string;stationId:string;area:number;unitPrice:number;totalAmount:number;paidAmount:number;overdueDays:number;status:string;dueDate:string;valveStatus:string}>;
+  }
+}
+
+import { useState, useEffect, useCallback } from 'react';
 import { Row, Col, Card, Table, Tag, Button, Modal, Descriptions, Select, Input, Form, message, Steps, Statistic, Result, Upload, Radio, Tabs, InputNumber, Spin } from 'antd';
 import {
   FileAddOutlined,
@@ -17,6 +24,11 @@ import {
 import ReactECharts from 'echarts-for-react';
 import { generateInstallationRequests } from '../../mock/data';
 import type { InstallationRequest } from '../../types';
+
+if (!window.__newRoomData) window.__newRoomData = [];
+if (!window.__newBilling) window.__newBilling = [];
+
+const STORAGE_KEY = 'heating_installation_data';
 
 const STATUS_CONFIG: Record<InstallationRequest['status'], { color: string; text: string }> = {
   submitted: { color: 'blue', text: '已提交' },
@@ -64,7 +76,7 @@ const statusOptions = [
 ];
 
 function Installation() {
-  const [data, setData] = useState<InstallationRequest[]>([]);
+  const [data, setDataRaw] = useState<InstallationRequest[]>([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchText, setSearchText] = useState('');
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -74,14 +86,31 @@ function Installation() {
   const [verifyState, setVerifyState] = useState<'idle' | 'verifying' | 'passed' | 'failed'>('idle');
   const [reviewForms, setReviewForms] = useState<Record<string, { result?: string; note?: string }>>({});
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [constructionForms, setConstructionForms] = useState<Record<string, { manager?: string; startDate?: string; endDate?: string; attachments?: string[] }>>({});
+
+  const setData = useCallback((updater: InstallationRequest[] | ((prev: InstallationRequest[]) => InstallationRequest[])) => {
+    setDataRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as InstallationRequest[];
+        setDataRaw(parsed);
+        return;
+      }
+    } catch {}
     const initialData = generateInstallationRequests().map(d =>
       d.status === 'submitted'
         ? { ...d, status: 'checking' as const, checkResult: 'pass' as const, checkNote: '接入条件校验通过，管网容量充足', recommendedStation: 'ST-朝-1', recommendedStationName: '望京花园换热站' }
         : d
     );
-    setData(initialData);
+    setDataRaw(initialData);
   }, []);
 
   const filteredData = data.filter(item => {
@@ -128,7 +157,7 @@ function Installation() {
       submittedAt: new Date().toLocaleString('zh-CN').replace(/\//g, '-'),
       documents: uploadedFiles.length > 0 ? [...uploadedFiles] : undefined,
     };
-    setData([newRequest, ...data]);
+    setData(prev => [newRequest, ...prev]);
     message.success('报装申请已提交成功');
     form.resetFields();
     setVerifyState('idle');
@@ -137,48 +166,90 @@ function Installation() {
   };
 
   const handleReviewSubmit = (record: InstallationRequest) => {
-    const form = reviewForms[record.id];
-    if (!form?.result) {
+    const formVal = reviewForms[record.id];
+    if (!formVal?.result) {
       message.warning('请选择审核结果');
       return;
     }
-    const updated = data.map(d => {
+
+    if (record.status === 'inspection' && formVal.result === 'pass') {
+      if (!window.__newRoomData) window.__newRoomData = [];
+      if (!window.__newBilling) window.__newBilling = [];
+      window.__newRoomData.push({
+        id: 'room-' + record.id,
+        userId: 'U-' + record.id,
+        userName: record.applicantName,
+        address: record.address,
+        stationId: record.recommendedStation || 'ST-朝-1',
+        stationName: record.recommendedStationName || '望京花园换热站',
+        community: '新接入用户',
+        currentTemp: 20,
+        targetTemp: 20,
+        status: 'normal',
+        lastUpdate: new Date().toLocaleString('zh-CN'),
+      });
+      window.__newBilling.push({
+        id: 'bill-' + record.id,
+        userId: 'U-' + record.id,
+        userName: record.applicantName,
+        address: record.address,
+        stationId: record.recommendedStation || 'ST-朝-1',
+        area: record.area,
+        unitPrice: 28,
+        totalAmount: record.area * 28,
+        paidAmount: 0,
+        overdueDays: 0,
+        status: 'overdue',
+        dueDate: new Date(Date.now() + 30 * 86400000).toLocaleDateString('zh-CN'),
+        valveStatus: 'open',
+      });
+    }
+
+    const cForm = constructionForms[record.id];
+    const constructionUpdate = record.status === 'construction' && cForm ? {
+      constructionManager: cForm.manager,
+      constructionStartDate: cForm.startDate,
+      constructionEndDate: cForm.endDate,
+      constructionAttachments: cForm.attachments,
+    } : {};
+
+    setData(prev => prev.map(d => {
       if (d.id !== record.id) return d;
       if (record.status === 'checking') {
         return {
           ...d,
-          checkResult: form.result === 'pass' ? 'pass' as const : 'fail' as const,
-          checkNote: form.note,
-          status: form.result === 'pass' ? 'design_review' as const : 'rejected' as const,
+          checkResult: formVal.result === 'pass' ? 'pass' as const : 'fail' as const,
+          checkNote: formVal.note,
+          status: formVal.result === 'pass' ? 'design_review' as const : 'rejected' as const,
         };
       }
       if (record.status === 'design_review') {
         return {
           ...d,
-          designApproved: form.result === 'approve',
-          designNote: form.note,
-          status: form.result === 'approve' ? 'construction' as const : 'rejected' as const,
+          designApproved: formVal.result === 'approve',
+          designNote: formVal.note,
+          status: formVal.result === 'approve' ? 'construction' as const : 'rejected' as const,
         };
       }
       if (record.status === 'construction') {
         return {
           ...d,
-          constructionCompleted: form.result === 'complete',
-          constructionNote: form.note,
-          status: form.result === 'complete' ? 'inspection' as const : 'construction' as const,
+          ...constructionUpdate,
+          constructionCompleted: formVal.result === 'complete',
+          constructionNote: formVal.note,
+          status: formVal.result === 'complete' ? 'inspection' as const : 'construction' as const,
         };
       }
       if (record.status === 'inspection') {
         return {
           ...d,
-          inspectionPassed: form.result === 'pass',
-          inspectionNote: form.note,
-          status: form.result === 'pass' ? 'completed' as const : 'construction' as const,
+          inspectionPassed: formVal.result === 'pass',
+          inspectionNote: formVal.note,
+          status: formVal.result === 'pass' ? 'completed' as const : 'construction' as const,
         };
       }
       return d;
-    });
-    setData(updated);
+    }));
     message.success('审核已提交');
   };
 
@@ -270,9 +341,16 @@ function Installation() {
       ),
     },
     {
+      title: '资料',
+      dataIndex: 'documents',
+      key: 'documents',
+      width: 70,
+      render: (documents?: string[]) => documents && documents.length > 0 ? <Tag color="blue">{documents.length}</Tag> : '-',
+    },
+    {
       title: '审核操作',
       key: 'action',
-      width: 360,
+      width: 600,
       render: (_: unknown, record: InstallationRequest) => {
         const formData = reviewForms[record.id] || {};
         const radioOptions = record.status === 'checking'
@@ -282,8 +360,9 @@ function Installation() {
             : record.status === 'construction'
               ? [{ label: '施工完成', value: 'complete' }, { label: '继续施工', value: 'continue' }]
               : [{ label: '验收通过', value: 'pass' }, { label: '验收不通过', value: 'fail' }];
+        const cFormData = constructionForms[record.id] || {};
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
             <Radio.Group
               size="small"
               options={radioOptions}
@@ -298,6 +377,70 @@ function Installation() {
               onChange={e => setReviewForms({ ...reviewForms, [record.id]: { ...formData, note: e.target.value } })}
             />
             <Button size="small" type="primary" onClick={() => handleReviewSubmit(record)}>提交审核</Button>
+            {record.documents && record.documents.length > 0 && (
+              <Button size="small" icon={<EyeOutlined />} onClick={() => handleView(record)}>查看资料</Button>
+            )}
+            {record.status === 'construction' && (
+              <Button size="small" type="primary" icon={<BuildOutlined />} onClick={() => {
+                const cForm2 = constructionForms[record.id];
+                const cUpdate = cForm2 ? {
+                  constructionManager: cForm2.manager,
+                  constructionStartDate: cForm2.startDate,
+                  constructionEndDate: cForm2.endDate,
+                  constructionAttachments: cForm2.attachments,
+                } : {};
+                setData(prev => prev.map(d => d.id !== record.id ? d : {
+                  ...d,
+                  ...cUpdate,
+                  constructionCompleted: true,
+                  status: 'inspection' as const,
+                }));
+                message.success('施工已完成');
+              }}>施工完成</Button>
+            )}
+            {record.status === 'construction' && (
+              <div style={{ width: '100%', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4, paddingTop: 4, borderTop: '1px dashed #d9d9d9' }}>
+                <Input
+                  size="small"
+                  placeholder="施工负责人"
+                  style={{ width: 120 }}
+                  value={cFormData.manager}
+                  onChange={e => setConstructionForms({ ...constructionForms, [record.id]: { ...cFormData, manager: e.target.value } })}
+                />
+                <Input
+                  size="small"
+                  placeholder="开工日期"
+                  style={{ width: 120 }}
+                  value={cFormData.startDate}
+                  onChange={e => setConstructionForms({ ...constructionForms, [record.id]: { ...cFormData, startDate: e.target.value } })}
+                />
+                <Input
+                  size="small"
+                  placeholder="完工日期"
+                  style={{ width: 120 }}
+                  value={cFormData.endDate}
+                  onChange={e => setConstructionForms({ ...constructionForms, [record.id]: { ...cFormData, endDate: e.target.value } })}
+                />
+                <Upload
+                  beforeUpload={(file) => {
+                    setConstructionForms({
+                      ...constructionForms,
+                      [record.id]: { ...cFormData, attachments: [...(cFormData.attachments || []), file.name] },
+                    });
+                    return false;
+                  }}
+                  onRemove={(file) => {
+                    setConstructionForms({
+                      ...constructionForms,
+                      [record.id]: { ...cFormData, attachments: (cFormData.attachments || []).filter(f => f !== file.name) },
+                    });
+                  }}
+                  fileList={(cFormData.attachments || []).map((name, idx) => ({ uid: String(idx), name, status: 'done' as const }))}
+                >
+                  <Button size="small" icon={<UploadOutlined />}>上传附件</Button>
+                </Upload>
+              </div>
+            )}
           </div>
         );
       },
@@ -546,6 +689,24 @@ function Installation() {
                     {selectedRecord.constructionCompleted ? '施工完成' : '施工中'}
                   </Tag>
                   {selectedRecord.constructionNote}
+                </Descriptions.Item>
+              )}
+              {(selectedRecord.constructionManager || selectedRecord.constructionStartDate || selectedRecord.constructionEndDate) && (
+                <Descriptions.Item label="施工详情" span={2}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {selectedRecord.constructionManager && <span>负责人：{selectedRecord.constructionManager}</span>}
+                    {selectedRecord.constructionStartDate && <span>开工日期：{selectedRecord.constructionStartDate}</span>}
+                    {selectedRecord.constructionEndDate && <span>完工日期：{selectedRecord.constructionEndDate}</span>}
+                  </div>
+                </Descriptions.Item>
+              )}
+              {selectedRecord.constructionAttachments && selectedRecord.constructionAttachments.length > 0 && (
+                <Descriptions.Item label="施工附件" span={2}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {selectedRecord.constructionAttachments.map((doc, idx) => (
+                      <Tag key={idx} icon={<FileAddOutlined />} color="blue">{doc}</Tag>
+                    ))}
+                  </div>
                 </Descriptions.Item>
               )}
               {selectedRecord.documents && selectedRecord.documents.length > 0 && (

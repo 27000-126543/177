@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Row, Col, Card, Table, Tag, Button, Modal, Descriptions, Select, Input, message, Statistic, Badge, Steps, Tabs } from 'antd';
 import {
   DollarOutlined,
@@ -12,6 +12,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import { useLocation } from 'react-router-dom';
 import { generateBillingRecords } from '../../mock/data';
 import type { BillingRecord } from '../../types';
 import { useAuth } from '../../store/authStore';
@@ -22,6 +23,14 @@ const REGION_CODE: Record<string, string> = {
   '丰台区': '丰',
   '东城区': '东',
   '西城区': '西',
+};
+
+const REGION_CODE_REVERSE: Record<string, string> = {
+  '朝': '朝阳区',
+  '海': '海淀区',
+  '丰': '丰台区',
+  '东': '东城区',
+  '西': '西城区',
 };
 
 const REGION_OPTIONS = [
@@ -89,6 +98,7 @@ interface ValveLog {
 function Billing() {
   const { currentUser, userRegion, userStationIds } = useAuth();
   const userRole = currentUser?.role || 'user';
+  const location = useLocation();
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [regionFilter, setRegionFilter] = useState('全部');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -101,12 +111,54 @@ function Billing() {
   const [valveLogs, setValveLogs] = useState<ValveLog[]>([]);
 
   const refreshData = () => {
-    setRecords(generateBillingRecords());
+    const mockRecords = generateBillingRecords();
+    const newBilling = (window as unknown as Record<string, unknown>).__newBilling as Array<BillingRecord> | undefined;
+    if (newBilling && newBilling.length > 0) {
+      setRecords([...newBilling, ...mockRecords]);
+    } else {
+      setRecords(mockRecords);
+    }
   };
 
   useEffect(() => {
     refreshData();
+    const navState = location.state as { region?: string; community?: string; stationId?: string } | null;
+    if (navState?.region) {
+      setRegionFilter(navState.region);
+    }
   }, []);
+
+  useEffect(() => {
+    if (userRole === 'region_manager' && userRegion) {
+      setRegionFilter(userRegion);
+    }
+    if (userRole === 'station_admin' && userStationIds.length > 0) {
+      const allowedRegions = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      if (allowedRegions.length === 1) {
+        setRegionFilter(allowedRegions[0]);
+      }
+    }
+  }, [userRole, userRegion, userStationIds]);
+
+  const allowedRegionOptions = useMemo(() => {
+    if (userRole === 'region_manager') {
+      return [{ value: userRegion, label: userRegion }];
+    }
+    if (userRole === 'station_admin' && userStationIds.length > 0) {
+      const allowedRegions = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      return [
+        { value: '全部', label: '全部区域' },
+        ...allowedRegions.map(r => ({ value: r, label: r })),
+      ];
+    }
+    return REGION_OPTIONS;
+  }, [userRole, userRegion, userStationIds]);
 
   const roleFilteredRecords = records.filter(r => {
     if (userRole === 'company_admin') return true;
@@ -528,8 +580,9 @@ function Billing() {
           <Select
             value={regionFilter}
             onChange={setRegionFilter}
-            options={REGION_OPTIONS}
+            options={allowedRegionOptions}
             style={{ width: 140 }}
+            disabled={userRole === 'region_manager' || (userRole === 'station_admin' && allowedRegionOptions.length <= 2)}
           />
         </Col>
         <Col>

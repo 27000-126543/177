@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Row,
   Col,
@@ -35,6 +35,15 @@ import type { RoomTempData, RepairRequest } from '../../types';
 import { useAuth } from '../../store/authStore';
 
 const REGIONS = ['全部', '朝阳区', '海淀区', '丰台区', '东城区', '西城区'];
+
+const REGION_CODE_REVERSE: Record<string, string> = {
+  '朝': '朝阳区',
+  '海': '海淀区',
+  '丰': '丰台区',
+  '东': '东城区',
+  '西': '西城区',
+};
+
 const STATUS_OPTIONS = [
   { value: '全部', label: '全部状态' },
   { value: 'normal', label: '正常' },
@@ -111,13 +120,57 @@ function UserSide() {
   const [ratingRepair, setRatingRepair] = useState<RepairRequest | null>(null);
 
   const refreshData = () => {
-    setRoomData(generateRoomTempData());
+    const mockRoomData = generateRoomTempData();
+    const newRoomData = (window as unknown as Record<string, unknown>).__newRoomData as Array<RoomTempData> | undefined;
+    if (newRoomData && newRoomData.length > 0) {
+      setRoomData([...newRoomData, ...mockRoomData]);
+    } else {
+      setRoomData(mockRoomData);
+    }
   };
 
   useEffect(() => {
-    setRoomData(generateRoomTempData());
+    const mockRoomData = generateRoomTempData();
+    const newRoomData = (window as unknown as Record<string, unknown>).__newRoomData as Array<RoomTempData> | undefined;
+    if (newRoomData && newRoomData.length > 0) {
+      setRoomData([...newRoomData, ...mockRoomData]);
+    } else {
+      setRoomData(mockRoomData);
+    }
     setRepairData(generateRepairRequests());
   }, []);
+
+  useEffect(() => {
+    if (userRole === 'region_manager' && userRegion) {
+      setSelectedRegion(userRegion);
+    }
+    if (userRole === 'station_admin' && userStationIds.length > 0) {
+      const allowedRegions = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      if (allowedRegions.length === 1) {
+        setSelectedRegion(allowedRegions[0]);
+      }
+    }
+  }, [userRole, userRegion, userStationIds]);
+
+  const regionOptions = useMemo(() => {
+    if (userRole === 'region_manager') {
+      return [{ value: userRegion, label: userRegion }];
+    }
+    if (userRole === 'station_admin' && userStationIds.length > 0) {
+      const allowedRegions = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      return [
+        { value: '全部', label: '全部' },
+        ...allowedRegions.map(r => ({ value: r, label: r })),
+      ];
+    }
+    return REGIONS.map(r => ({ value: r, label: r }));
+  }, [userRole, userRegion, userStationIds]);
 
   const roleFilteredRoomData = roomData.filter(item => {
     if (userRole === 'company_admin') return true;
@@ -596,11 +649,12 @@ function UserSide() {
               </Col>
               <Col>
                 <Select
-                  value={selectedRegion}
-                  onChange={setSelectedRegion}
-                  style={{ width: 140 }}
-                  options={REGIONS.map(r => ({ value: r, label: r }))}
-                />
+                value={selectedRegion}
+                onChange={setSelectedRegion}
+                style={{ width: 140 }}
+                options={regionOptions}
+                disabled={userRole === 'region_manager' || (userRole === 'station_admin' && regionOptions.length <= 2)}
+              />
               </Col>
               <Col>状态：</Col>
               <Col>

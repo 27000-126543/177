@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Row, Col, Card, Statistic, Tag, Table, Badge, Select, Button } from 'antd';
+import { Row, Col, Card, Statistic, Tag, Table, Badge, Select, Button, Modal } from 'antd';
 import {
   FireOutlined,
   CheckCircleOutlined,
@@ -19,6 +19,7 @@ import {
 } from '../../mock/data';
 import type { AlertRecord, HeatSourcePlant, HeatStation, RoomTempData, BillingRecord } from '../../types';
 import { useAuth } from '../../store/authStore';
+import { useNavigate } from 'react-router-dom';
 
 const regionOptions = [
   { value: '全部', label: '全部' },
@@ -69,6 +70,7 @@ function generateTempTrend(): { hours: string[]; rates: number[] } {
 
 const Dashboard: React.FC = () => {
   const { currentUser, userRegion, userStationIds } = useAuth();
+  const navigate = useNavigate();
   const userRole = currentUser?.role || 'user';
 
   const [rawPlants, setRawPlants] = useState<HeatSourcePlant[]>(generateHeatSourcePlants());
@@ -80,6 +82,7 @@ const Dashboard: React.FC = () => {
   const [region, setRegion] = useState('全部');
   const [community, setCommunity] = useState<string | undefined>(undefined);
   const [stationFilter, setStationFilter] = useState<string | undefined>(undefined);
+  const [overdueModalVisible, setOverdueModalVisible] = useState(false);
 
   const roleFilteredStations = useMemo(() => {
     if (userRole === 'company_admin') return rawStations;
@@ -174,6 +177,14 @@ const Dashboard: React.FC = () => {
     if (filteredStationIds.size === new Set(roleFilteredBilling.map(b => b.stationId)).size && region === '全部') return roleFilteredBilling;
     return roleFilteredBilling.filter(b => filteredStationIds.has(b.stationId));
   }, [roleFilteredBilling, filteredStationIds, region]);
+
+  const overdueRecords = filteredBilling.filter(b => b.overdueDays > 30);
+
+  const stationNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    rawStations.forEach(s => { map.set(s.id, s.name); });
+    return map;
+  }, [rawStations]);
 
   const handleRegionChange = useCallback((value: string) => {
     setRegion(value);
@@ -583,7 +594,7 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col span={4}>
-          <Card className="dashboard-card">
+          <Card className="dashboard-card" style={{ cursor: 'pointer' }} onClick={() => setOverdueModalVisible(true)}>
             <Statistic
               title="欠费户数"
               value={summary.overdueCount}
@@ -629,8 +640,8 @@ const Dashboard: React.FC = () => {
             <ReactECharts option={gaugeOption} style={{ height: 180 }} />
             <div style={{ textAlign: 'center', marginTop: 8 }}>
               <div style={{ marginBottom: 8 }}>
-                <span style={{ marginRight: 16 }}>欠费户数: <strong style={{ color: '#f5222d' }}>{summary.overdueCount}</strong></span>
-                <span>欠费总额: <strong style={{ color: '#f5222d' }}>¥{summary.totalOverdueAmount.toFixed(0)}</strong></span>
+                <span style={{ marginRight: 16, cursor: 'pointer' }} onClick={() => setOverdueModalVisible(true)}>欠费户数: <strong style={{ color: '#f5222d' }}>{summary.overdueCount}</strong></span>
+                <span style={{ cursor: 'pointer' }} onClick={() => setOverdueModalVisible(true)}>欠费总额: <strong style={{ color: '#f5222d' }}>¥{summary.totalOverdueAmount.toFixed(0)}</strong></span>
               </div>
             </div>
           </Card>
@@ -644,6 +655,36 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      <Modal
+        title="欠费用户明细"
+        open={overdueModalVisible}
+        onCancel={() => setOverdueModalVisible(false)}
+        width={800}
+        footer={[
+          <Button key="billing" type="primary" onClick={() => {
+            setOverdueModalVisible(false);
+            navigate('/billing', { state: { region, community, stationId: stationFilter } });
+          }}>
+            前往费用管理
+          </Button>,
+        ]}
+      >
+        <Table
+          dataSource={overdueRecords}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 5 }}
+          columns={[
+            { title: '用户', dataIndex: 'userName', key: 'userName' },
+            { title: '地址', dataIndex: 'address', key: 'address', ellipsis: true },
+            { title: '所属换热站', key: 'stationName', render: (_: unknown, record: BillingRecord) => stationNameMap.get(record.stationId) || '--' },
+            { title: '欠缴金额', key: 'oweAmount', render: (_: unknown, record: BillingRecord) => `¥${(record.totalAmount - record.paidAmount).toFixed(2)}` },
+            { title: '逾期天数', dataIndex: 'overdueDays', key: 'overdueDays' },
+            { title: '状态', dataIndex: 'status', key: 'status', render: (v: string) => <Tag color={v === 'overdue' ? 'red' : v === 'partial' ? 'orange' : 'default'}>{v === 'overdue' ? '欠费' : v === 'partial' ? '部分缴费' : v === 'restricted' ? '已限制' : '已缴费'}</Tag> },
+          ]}
+        />
+      </Modal>
     </div>
   );
 };

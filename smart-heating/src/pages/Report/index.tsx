@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Row, Col, Card, Table, Button, Select, DatePicker, Statistic, Tabs, message } from 'antd';
 import {
   DownloadOutlined,
@@ -10,12 +10,21 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { generateMonthlyReports } from '../../mock/data';
+import { useAuth } from '../../store/authStore';
 import * as XLSX from 'xlsx';
 import type { MonthlyReport } from '../../types';
 
 const { MonthPicker } = DatePicker;
 
 const REGIONS = ['朝阳区', '海淀区', '丰台区', '东城区', '西城区'];
+
+const REGION_CODE_REVERSE: Record<string, string> = {
+  '朝': '朝阳区',
+  '海': '海淀区',
+  '丰': '丰台区',
+  '东': '东城区',
+  '西': '西城区',
+};
 
 const regionOptions = [
   { value: '全部', label: '全部' },
@@ -28,6 +37,40 @@ const Report: React.FC = () => {
   const [region, setRegion] = useState('全部');
   const [month, setMonth] = useState<string | null>(null);
   const [reports] = useState<MonthlyReport[]>(generateMonthlyReports());
+  const { currentUser, userRegion, userStationIds } = useAuth();
+  const userRole = currentUser?.role || 'user';
+
+  useEffect(() => {
+    if (userRole === 'region_manager' && userRegion) {
+      setRegion(userRegion);
+    }
+    if (userRole === 'station_admin' && userStationIds.length > 0) {
+      const allowedRegions = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      if (allowedRegions.length === 1) {
+        setRegion(allowedRegions[0]);
+      }
+    }
+  }, [userRole, userRegion, userStationIds]);
+
+  const allowedRegionOptions = useMemo(() => {
+    if (userRole === 'region_manager') {
+      return [{ value: userRegion, label: userRegion }];
+    }
+    if (userRole === 'station_admin' && userStationIds.length > 0) {
+      const allowedRegions = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      return [
+        { value: '全部', label: '全部' },
+        ...allowedRegions.map(r => ({ value: r, label: r })),
+      ];
+    }
+    return regionOptions;
+  }, [userRole, userRegion, userStationIds]);
 
   const filteredReports = useMemo(() => {
     let data = reports;
@@ -524,8 +567,9 @@ const Report: React.FC = () => {
           <Select
             value={region}
             onChange={setRegion}
-            options={regionOptions}
+            options={allowedRegionOptions}
             style={{ width: 140 }}
+            disabled={userRole === 'region_manager' || userRole === 'station_admin'}
           />
         </Col>
         <Col>

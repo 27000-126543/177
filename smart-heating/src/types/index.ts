@@ -180,6 +180,10 @@ export interface InstallationRequest {
   inspectionPassed?: boolean;
   inspectionNote?: string;
   documents?: string[];
+  constructionManager?: string;
+  constructionStartDate?: string;
+  constructionEndDate?: string;
+  constructionAttachments?: string[];
 }
 
 export interface MonthlyReport {
