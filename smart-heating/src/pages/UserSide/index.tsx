@@ -34,6 +34,19 @@ import { generateRoomTempData, generateRepairRequests } from '../../mock/data';
 import type { RoomTempData, RepairRequest } from '../../types';
 import { useAuth } from '../../store/authStore';
 
+const REGION_CODE: Record<string, string> = {
+  '朝阳区': '朝',
+  '海淀区': '海',
+  '丰台区': '丰',
+  '东城区': '东',
+  '西城区': '西',
+};
+
+function stationIdMatchesRegion(stationId: string, region: string): boolean {
+  const code = REGION_CODE[region];
+  return code ? stationId.startsWith(`ST-${code}-`) : false;
+}
+
 const REGIONS = ['全部', '朝阳区', '海淀区', '丰台区', '东城区', '西城区'];
 
 const REGION_CODE_REVERSE: Record<string, string> = {
@@ -121,8 +134,12 @@ function UserSide() {
 
   const refreshData = () => {
     const mockRoomData = generateRoomTempData();
-    const newRoomData = (window as unknown as Record<string, unknown>).__newRoomData as Array<RoomTempData> | undefined;
-    if (newRoomData && newRoomData.length > 0) {
+    let newRoomData: RoomTempData[] = [];
+    try {
+      const saved = localStorage.getItem('heating_new_room');
+      if (saved) newRoomData = JSON.parse(saved);
+    } catch {}
+    if (newRoomData.length > 0) {
       setRoomData([...newRoomData, ...mockRoomData]);
     } else {
       setRoomData(mockRoomData);
@@ -131,8 +148,12 @@ function UserSide() {
 
   useEffect(() => {
     const mockRoomData = generateRoomTempData();
-    const newRoomData = (window as unknown as Record<string, unknown>).__newRoomData as Array<RoomTempData> | undefined;
-    if (newRoomData && newRoomData.length > 0) {
+    let newRoomData: RoomTempData[] = [];
+    try {
+      const saved = localStorage.getItem('heating_new_room');
+      if (saved) newRoomData = JSON.parse(saved);
+    } catch {}
+    if (newRoomData.length > 0) {
       setRoomData([...newRoomData, ...mockRoomData]);
     } else {
       setRoomData(mockRoomData);
@@ -174,23 +195,20 @@ function UserSide() {
 
   const roleFilteredRoomData = roomData.filter(item => {
     if (userRole === 'company_admin') return true;
-    if (userRole === 'region_manager') return item.address.includes(userRegion) || item.stationName.includes(userRegion);
+    if (userRole === 'region_manager') return stationIdMatchesRegion(item.stationId, userRegion);
     if (userRole === 'station_admin') return userStationIds.includes(item.stationId);
     return item.userName === currentUser?.name;
   });
 
   const roleFilteredRepairData = repairData.filter(item => {
     if (userRole === 'company_admin') return true;
-    if (userRole === 'region_manager') return item.address.includes(userRegion) || item.stationName.includes(userRegion);
+    if (userRole === 'region_manager') return stationIdMatchesRegion(item.stationId, userRegion);
     if (userRole === 'station_admin') return userStationIds.includes(item.stationId);
     return item.userName === currentUser?.name;
   });
 
   const filteredRoomData = roleFilteredRoomData.filter(item => {
-    if (selectedRegion !== '全部' && item.stationName.includes(selectedRegion) === false) {
-      const regionMatch = item.address.includes(selectedRegion) || item.stationName.includes(selectedRegion);
-      if (!regionMatch) return false;
-    }
+    if (selectedRegion !== '全部' && !stationIdMatchesRegion(item.stationId, selectedRegion)) return false;
     if (selectedStatus !== '全部' && item.status !== selectedStatus) return false;
     if (searchText) {
       const lower = searchText.toLowerCase();
@@ -204,10 +222,7 @@ function UserSide() {
   });
 
   const filteredRepairData = roleFilteredRepairData.filter(item => {
-    if (selectedRegion !== '全部') {
-      const regionMatch = item.address.includes(selectedRegion) || item.stationName.includes(selectedRegion);
-      if (!regionMatch) return false;
-    }
+    if (selectedRegion !== '全部' && !stationIdMatchesRegion(item.stationId, selectedRegion)) return false;
     if (searchText) {
       const lower = searchText.toLowerCase();
       return (

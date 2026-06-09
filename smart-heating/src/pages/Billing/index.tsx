@@ -101,6 +101,7 @@ function Billing() {
   const location = useLocation();
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [regionFilter, setRegionFilter] = useState('全部');
+  const [stationIdFilter, setStationIdFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchName, setSearchName] = useState('');
   const [paymentModal, setPaymentModal] = useState(false);
@@ -112,8 +113,12 @@ function Billing() {
 
   const refreshData = () => {
     const mockRecords = generateBillingRecords();
-    const newBilling = (window as unknown as Record<string, unknown>).__newBilling as Array<BillingRecord> | undefined;
-    if (newBilling && newBilling.length > 0) {
+    const savedNewBilling = localStorage.getItem('heating_new_billing');
+    let newBilling: BillingRecord[] = [];
+    try {
+      if (savedNewBilling) newBilling = JSON.parse(savedNewBilling);
+    } catch {}
+    if (newBilling.length > 0) {
       setRecords([...newBilling, ...mockRecords]);
     } else {
       setRecords(mockRecords);
@@ -123,8 +128,11 @@ function Billing() {
   useEffect(() => {
     refreshData();
     const navState = location.state as { region?: string; community?: string; stationId?: string } | null;
-    if (navState?.region) {
+    if (navState?.region && navState.region !== '全部') {
       setRegionFilter(navState.region);
+    }
+    if (navState?.stationId) {
+      setStationIdFilter(navState.stationId);
     }
   }, []);
 
@@ -169,6 +177,7 @@ function Billing() {
 
   const filteredRecords = roleFilteredRecords.filter(r => {
     if (regionFilter !== '全部' && !r.stationId.includes(REGION_CODE[regionFilter])) return false;
+    if (stationIdFilter && r.stationId !== stationIdFilter) return false;
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (searchName && !r.userName.includes(searchName)) return false;
     return true;
@@ -359,7 +368,7 @@ function Billing() {
   const overdueDistribution = () => {
     const ranges = ['0-7', '7-15', '15-30', '30-60', '60-90', '90+'];
     const counts = [0, 0, 0, 0, 0, 0];
-    records.forEach(r => {
+    roleFilteredRecords.forEach(r => {
       if (r.overdueDays <= 7) counts[0]++;
       else if (r.overdueDays <= 15) counts[1]++;
       else if (r.overdueDays <= 30) counts[2]++;
@@ -387,9 +396,18 @@ function Billing() {
   };
 
   const overdueByRegion = () => {
-    const regionNames = ['朝阳区', '海淀区', '丰台区', '东城区', '西城区'];
+    let regionNames: string[] = ['朝阳区', '海淀区', '丰台区', '东城区', '西城区'];
+    if (userRole === 'region_manager') {
+      regionNames = [userRegion];
+    } else if (userRole === 'station_admin') {
+      const allowed = [...new Set(userStationIds.map(sid => {
+        const parts = sid.split('-');
+        return REGION_CODE_REVERSE[parts[1]] || '';
+      }).filter(Boolean))];
+      regionNames = allowed;
+    }
     const amounts = regionNames.map(region =>
-      Number(records.filter(r => r.stationId.includes(REGION_CODE[region]) && r.status !== 'paid').reduce((s, r) => s + (r.totalAmount - r.paidAmount), 0).toFixed(2))
+      Number(roleFilteredRecords.filter(r => r.stationId.includes(REGION_CODE[region]) && r.status !== 'paid').reduce((s, r) => s + (r.totalAmount - r.paidAmount), 0).toFixed(2))
     );
     return {
       tooltip: { trigger: 'axis' as const },

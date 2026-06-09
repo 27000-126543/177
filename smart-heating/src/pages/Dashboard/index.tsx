@@ -76,8 +76,18 @@ const Dashboard: React.FC = () => {
   const [rawPlants, setRawPlants] = useState<HeatSourcePlant[]>(generateHeatSourcePlants());
   const [rawStations, setRawStations] = useState<HeatStation[]>(generateHeatStations());
   const [rawAlerts, setRawAlerts] = useState<AlertRecord[]>(generateAlerts());
-  const [rawRoomData, setRawRoomData] = useState<RoomTempData[]>(generateRoomTempData());
-  const [rawBilling, setRawBilling] = useState<BillingRecord[]>(generateBillingRecords());
+  const [rawRoomData, setRawRoomData] = useState<RoomTempData[]>(() => {
+    const mockRoom = generateRoomTempData();
+    let savedRoom: RoomTempData[] = [];
+    try { const s = localStorage.getItem('heating_new_room'); if (s) savedRoom = JSON.parse(s); } catch {}
+    return savedRoom.length > 0 ? [...savedRoom, ...mockRoom] : mockRoom;
+  });
+  const [rawBilling, setRawBilling] = useState<BillingRecord[]>(() => {
+    const mockBill = generateBillingRecords();
+    let savedBill: BillingRecord[] = [];
+    try { const s = localStorage.getItem('heating_new_billing'); if (s) savedBill = JSON.parse(s); } catch {}
+    return savedBill.length > 0 ? [...savedBill, ...mockBill] : mockBill;
+  });
   const [tempTrend, setTempTrend] = useState(generateTempTrend());
   const [region, setRegion] = useState('全部');
   const [community, setCommunity] = useState<string | undefined>(undefined);
@@ -131,8 +141,14 @@ const Dashboard: React.FC = () => {
     setRawPlants(generateHeatSourcePlants());
     setRawStations(generateHeatStations());
     setRawAlerts(generateAlerts());
-    setRawRoomData(generateRoomTempData());
-    setRawBilling(generateBillingRecords());
+    const mockRoom = generateRoomTempData();
+    let savedRoom: RoomTempData[] = [];
+    try { const s = localStorage.getItem('heating_new_room'); if (s) savedRoom = JSON.parse(s); } catch {}
+    setRawRoomData(savedRoom.length > 0 ? [...savedRoom, ...mockRoom] : mockRoom);
+    const mockBill = generateBillingRecords();
+    let savedBill: BillingRecord[] = [];
+    try { const s = localStorage.getItem('heating_new_billing'); if (s) savedBill = JSON.parse(s); } catch {}
+    setRawBilling(savedBill.length > 0 ? [...savedBill, ...mockBill] : mockBill);
     setTempTrend(generateTempTrend());
   }, []);
 

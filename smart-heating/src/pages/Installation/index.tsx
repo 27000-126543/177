@@ -173,9 +173,7 @@ function Installation() {
     }
 
     if (record.status === 'inspection' && formVal.result === 'pass') {
-      if (!window.__newRoomData) window.__newRoomData = [];
-      if (!window.__newBilling) window.__newBilling = [];
-      window.__newRoomData.push({
+      const newRoom = {
         id: 'room-' + record.id,
         userId: 'U-' + record.id,
         userName: record.applicantName,
@@ -187,8 +185,8 @@ function Installation() {
         targetTemp: 20,
         status: 'normal',
         lastUpdate: new Date().toLocaleString('zh-CN'),
-      });
-      window.__newBilling.push({
+      };
+      const newBill = {
         id: 'bill-' + record.id,
         userId: 'U-' + record.id,
         userName: record.applicantName,
@@ -199,10 +197,24 @@ function Installation() {
         totalAmount: record.area * 28,
         paidAmount: 0,
         overdueDays: 0,
-        status: 'overdue',
+        status: 'overdue' as const,
         dueDate: new Date(Date.now() + 30 * 86400000).toLocaleDateString('zh-CN'),
-        valveStatus: 'open',
-      });
+        valveStatus: 'open' as const,
+      };
+      if (!window.__newRoomData) window.__newRoomData = [];
+      if (!window.__newBilling) window.__newBilling = [];
+      window.__newRoomData.push(newRoom);
+      window.__newBilling.push(newBill);
+      try {
+        const existingRoom = JSON.parse(localStorage.getItem('heating_new_room') || '[]');
+        existingRoom.push(newRoom);
+        localStorage.setItem('heating_new_room', JSON.stringify(existingRoom));
+      } catch {}
+      try {
+        const existingBill = JSON.parse(localStorage.getItem('heating_new_billing') || '[]');
+        existingBill.push(newBill);
+        localStorage.setItem('heating_new_billing', JSON.stringify(existingBill));
+      } catch {}
     }
 
     const cForm = constructionForms[record.id];
